@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KV Cache Monitor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="viz-root">
+    <header class="topbar">
+      <div>
+        <h1>KV Cache Monitor</h1>
+        <div class="sub" id="model-name">vLLM GPU 메모리 실시간 모니터링</div>
+      </div>
+      <div class="controls">
+        <div class="seg" id="range" role="group" aria-label="시간 범위">
+          <button data-range="300" class="on">5분</button>
+          <button data-range="900">15분</button>
+          <button data-range="3600">1시간</button>
+        </div>
+        <span class="status" id="status"><span class="dot"></span><span id="status-text">연결 중…</span></span>
+      </div>
+    </header>
+
+    <section class="tiles">
+      <div class="tile"><div class="label">초당 요청 수</div><div class="value" id="t-rps">–</div><div class="unit">req/s</div></div>
+      <div class="tile"><div class="label">초당 완료 요청</div><div class="value" id="t-done">–</div><div class="unit">req/s</div></div>
+      <div class="tile"><div class="label">처리 중 요청</div><div class="value" id="t-running">–</div><div class="unit">running</div></div>
+      <div class="tile"><div class="label">대기 중 요청</div><div class="value" id="t-waiting">–</div><div class="unit">waiting</div></div>
+      <div class="tile"><div class="label">KV Cache 사용률</div><div class="value" id="t-kv">–</div><div class="unit">% of reserved</div></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>초당 요청 수</h2><span class="hint">엔진이 받은 요청 / 완료한 요청 (15초 평균)</span></div>
+      <div class="chart tall" id="c-rps"></div>
+    </section>
+
+    <section id="gpus" class="gpus"></section>
+    <div id="empty" class="empty" hidden>GPU 지표가 아직 없습니다. serving 컨테이너의 exporter(:9400)와 Prometheus 연결을 확인하세요.</div>
+
+    <div class="tooltip" id="tooltip" hidden></div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

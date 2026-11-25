@@ -1,0 +1,49 @@
+services:
+  serving:
+    build: ./serving
+    container_name: kvmon-serving
+    ports:
+      - "${VLLM_HOST_PORT:-8000}:8000"
+    environment:
+      MODEL: ${MODEL:-Qwen/Qwen2.5-0.5B-Instruct}
+      TENSOR_PARALLEL_SIZE: ${TENSOR_PARALLEL_SIZE:-1}
+      PIPELINE_PARALLEL_SIZE: ${PIPELINE_PARALLEL_SIZE:-1}
+      GPU_MEMORY_UTILIZATION: ${GPU_MEMORY_UTILIZATION:-0.85}
+      MAX_MODEL_LEN: ${MAX_MODEL_LEN:-4096}
+      VLLM_EXTRA_ARGS: ${VLLM_EXTRA_ARGS:-}
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  prometheus:
+    build: ./prometheus
+    container_name: kvmon-prometheus
+    ports:
+      - "${PROMETHEUS_HOST_PORT:-9090}:9090"
+    volumes:
+      - prom-data:/prometheus
+    depends_on:
+      - serving
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: kvmon-frontend
+    ports:
+      - "${FRONTEND_HOST_PORT:-8080}:8080"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  hf-cache:
+  prom-data:
