@@ -38,6 +38,15 @@ h3 { font-size: 12px; margin: 0; font-weight: 600; color: var(--text-secondary);
 .sub, .hint { color: var(--text-muted); font-size: 12px; margin-top: 4px; }
 .hint { margin: 0; }
 
+.server-select {
+  margin-top: 6px; max-width: 520px; min-width: 260px;
+  background: var(--surface-1); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 10px; font: inherit; font-size: 13px; cursor: pointer;
+}
+.server-select:focus { outline: 2px solid var(--series-1); outline-offset: 1px; }
+.empty code { color: var(--text-secondary); }
+
 .controls { display: flex; align-items: center; gap: 16px; }
 .seg { display: inline-flex; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
 .seg button {

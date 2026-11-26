@@ -2,12 +2,31 @@ global:
   scrape_interval: 2s
   evaluation_interval: 2s
 
+# 서버 목록은 config/servers.yml (→ /etc/prometheus/kvmon/servers.yml)
 scrape_configs:
   - job_name: vllm
     metrics_path: /metrics
-    static_configs:
-      - targets: ["serving:8000"]
+    file_sd_configs:
+      - files: [/etc/prometheus/kvmon/servers.yml]
+    relabel_configs:
+      # server 레이블이 없으면 주소를 이름으로
+      - source_labels: [server, __address__]
+        regex: ";(.+)"
+        target_label: server
 
   - job_name: gpu
-    static_configs:
-      - targets: ["serving:9400"]
+    file_sd_configs:
+      - files: [/etc/prometheus/kvmon/servers.yml]
+    relabel_configs:
+      - source_labels: [server, __address__]
+        regex: ";(.+)"
+        target_label: server
+      # exporter 기본 주소: vLLM 과 같은 host, 포트 9400
+      - source_labels: [__address__]
+        regex: "(.+):\\d+"
+        target_label: __address__
+        replacement: "${1}:9400"
+      # __exporter 를 적었으면 그 주소로
+      - source_labels: [__exporter]
+        regex: "(.+)"
+        target_label: __address__

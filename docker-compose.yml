@@ -4,6 +4,7 @@ services:
     container_name: kvmon-serving
     ports:
       - "${VLLM_HOST_PORT:-8000}:8000"
+      - "${EXPORTER_HOST_PORT:-9400}:9400"   # 다른 호스트의 Prometheus가 GPU 지표를 가져갈 때
     environment:
       MODEL: ${MODEL:-Qwen/Qwen2.5-0.5B-Instruct}
       TENSOR_PARALLEL_SIZE: ${TENSOR_PARALLEL_SIZE:-1}
@@ -31,6 +32,7 @@ services:
       - "${PROMETHEUS_HOST_PORT:-9090}:9090"
     volumes:
       - prom-data:/prometheus
+      - ./config:/etc/prometheus/kvmon:ro   # servers.yml (폴더째 마운트해야 수정이 바로 반영됨)
     depends_on:
       - serving
     restart: unless-stopped

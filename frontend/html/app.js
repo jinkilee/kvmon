@@ -310,7 +310,7 @@ function updateCard(card, v) {
 }
 
 /* ---------- refresh loop ---------- */
-const INSTANT = {
+const METRICS = {
   total: "kvmon_gpu_memory_total_bytes",
   used: "kvmon_gpu_memory_used_bytes",
   model: "kvmon_gpu_memory_model_bytes",
@@ -323,74 +323,130 @@ const INSTANT = {
   rx: "kvmon_gpu_pcie_rx_bytes_per_second",
   tx: "kvmon_gpu_pcie_tx_bytes_per_second",
 };
-const RANGE = {
-  model: INSTANT.model, kvused: INSTANT.kvused, other: INSTANT.other,
-  util: INSTANT.util, rw: INSTANT.rw, rx: INSTANT.rx, tx: INSTANT.tx,
-};
-const RPS = "sum(rate(kvmon_vllm_requests_received_total[15s])) or vector(0)";
-const DONE = "sum(rate(vllm:request_success_total[15s])) or vector(0)";
-const GLOBAL = {
-  rps: RPS,
-  done: DONE,
-  running: "sum(vllm:num_requests_running)",
-  waiting: "sum(vllm:num_requests_waiting)",
-  kv: "max(vllm:kv_cache_usage_perc) or max(vllm:gpu_cache_usage_perc)",
-  models: "count by (model_name) (vllm:num_requests_running)",
-};
+const RANGE_KEYS = ["model", "kvused", "other", "util", "rw", "rx", "tx"];
+
+/** All queries, limited to one server (the `server` label set in config/servers.yml). */
+function queriesFor(name) {
+  const sel = `{server="${name.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"}`;
+  const instant = Object.fromEntries(Object.entries(METRICS).map(([k, m]) => [k, m + sel]));
+  const range = Object.fromEntries(RANGE_KEYS.map((k) => [k, instant[k]]));
+  const rps = `sum(rate(kvmon_vllm_requests_received_total${sel}[15s])) or vector(0)`;
+  const done = `sum(rate(vllm:request_success_total${sel}[15s])) or vector(0)`;
+  const global = {
+    rps, done,
+    running: `sum(vllm:num_requests_running${sel})`,
+    waiting: `sum(vllm:num_requests_waiting${sel})`,
+    kv: `max(vllm:kv_cache_usage_perc${sel}) or max(vllm:gpu_cache_usage_perc${sel})`,
+  };
+  return { instant, range, global, rps, done };
+}
 
 const status = document.getElementById("status");
 const statusText = document.getElementById("status-text");
+const select = document.getElementById("server");
+let server = new URLSearchParams(location.hash.slice(1)).get("server") || "";
+let generation = 0; // bumps on server change so late responses for the old server are dropped
+let optionsKey = "";
 
-async function refresh() {
+/** Server list from Prometheus: every target of the vllm job, with its model and up state. */
+async function refreshServers() {
+  const [up, models] = await Promise.all([
+    // series without a server label (scraped before config/servers.yml existed) are skipped
+    instant('up{job="vllm", server!=""}'),
+    instant('group by (server, model_name) (vllm:num_requests_running{server!=""})'),
+  ]);
+  const modelOf = {};
+  for (const r of models) (modelOf[r.metric.server] ||= []).push(r.metric.model_name);
+  const list = up
+    .filter((r) => r.metric.server)
+    .map((r) => ({ name: r.metric.server, addr: r.metric.instance, up: r.value[1] === "1", models: modelOf[r.metric.server] || [] }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  if (server && !list.some((s) => s.name === server)) list.push({ name: server, addr: "", up: false, models: [], missing: true });
+
+  const key = JSON.stringify(list);
+  if (key === optionsKey) return; // rebuilding while the dropdown is open would close it
+  optionsKey = key;
+  const label = (s) => {
+    if (s.missing) return `${s.name} — 목록에 없음`;
+    const model = s.models.length ? s.models.join(", ") : s.up ? "모델 정보 없음" : "응답 없음";
+    return `${s.name} (${s.addr}) — ${model}`;
+  };
+  select.replaceChildren(new Option("서버 선택…", ""), ...list.map((s) => new Option(label(s), s.name)));
+  select.value = server;
+}
+
+function resetDashboard() {
+  for (const g of Object.keys(cards)) { cards[g].el.remove(); delete cards[g]; }
+  for (const id of ["t-rps", "t-done", "t-running", "t-waiting", "t-kv"]) document.getElementById(id).textContent = "–";
+  rpsChart.setData([[], []], null, null);
+  document.getElementById("empty").hidden = true;
+}
+
+async function refreshDashboard() {
+  const my = generation;
+  const Q = queriesFor(server);
   const end = Date.now() / 1000;
   const start = end - rangeSec;
   const step = Math.max(2, Math.round(rangeSec / 200));
+  const instKeys = Object.keys(Q.instant), rangeKeys = Object.keys(Q.range), globKeys = Object.keys(Q.global);
+  const [inst, rng, glob, rpsR, doneR] = await Promise.all([
+    Promise.all(instKeys.map((k) => instant(Q.instant[k]))),
+    Promise.all(rangeKeys.map((k) => range(Q.range[k], start, end, step))),
+    Promise.all(globKeys.map((k) => instant(Q.global[k]))),
+    range(Q.rps, start, end, step),
+    range(Q.done, start, end, step),
+  ]);
+  if (my !== generation) return;
+  const I = Object.fromEntries(instKeys.map((k, i) => [k, byGpu(inst[i])]));
+  const R = Object.fromEntries(rangeKeys.map((k, i) => [k, seriesByGpu(rng[i])]));
+  const G = Object.fromEntries(globKeys.map((k, i) => [k, glob[i]]));
+
+  // global tiles
+  document.getElementById("t-rps").textContent = fmtNum(scalar(G.rps), 2);
+  document.getElementById("t-done").textContent = fmtNum(scalar(G.done), 2);
+  document.getElementById("t-running").textContent = fmtNum(scalar(G.running), 0);
+  document.getElementById("t-waiting").textContent = fmtNum(scalar(G.waiting), 0);
+  document.getElementById("t-kv").textContent = fmtNum(scalar(G.kv) * 100, 1);
+
+  const toSeries = (res) => (res[0] ? res[0].values.map(([t, v]) => [t, parseFloat(v)]) : []);
+  rpsChart.setData([toSeries(rpsR), toSeries(doneR)], start, end);
+
+  // per-GPU cards, ordered by index
+  const meta = Object.fromEntries(inst[0].map((r) => [r.metric.gpu, r.metric.name]));
+  const gpus = Object.keys(I.total).sort((a, b) => a - b);
+  document.getElementById("empty").hidden = gpus.length > 0;
+  for (const g of Object.keys(cards)) if (!gpus.includes(g)) { cards[g].el.remove(); delete cards[g]; }
+  for (const g of gpus) {
+    const card = cards[g] || (cards[g] = createCard(g, meta[g] || ""));
+    updateCard(card, Object.fromEntries(instKeys.map((k) => [k, I[k][g]])));
+    const s = (k) => R[k][g] || [];
+    card.mem.setData([s("model"), s("kvused"), s("other")], start, end);
+    card.util.setData([s("util")], start, end);
+    card.rw.setData([s("rw")], start, end);
+    card.pcie.setData([s("rx"), s("tx")], start, end);
+  }
+}
+
+async function refresh() {
+  document.getElementById("pick").hidden = !!server;
+  document.getElementById("dash").hidden = !server;
   try {
-    const instKeys = Object.keys(INSTANT), rangeKeys = Object.keys(RANGE), globKeys = Object.keys(GLOBAL);
-    const [inst, rng, glob, rpsR, doneR] = await Promise.all([
-      Promise.all(instKeys.map((k) => instant(INSTANT[k]))),
-      Promise.all(rangeKeys.map((k) => range(RANGE[k], start, end, step))),
-      Promise.all(globKeys.map((k) => instant(GLOBAL[k]))),
-      range(RPS, start, end, step),
-      range(DONE, start, end, step),
-    ]);
-    const I = Object.fromEntries(instKeys.map((k, i) => [k, byGpu(inst[i])]));
-    const R = Object.fromEntries(rangeKeys.map((k, i) => [k, seriesByGpu(rng[i])]));
-    const G = Object.fromEntries(globKeys.map((k, i) => [k, glob[i]]));
-
-    // global tiles
-    document.getElementById("t-rps").textContent = fmtNum(scalar(G.rps), 2);
-    document.getElementById("t-done").textContent = fmtNum(scalar(G.done), 2);
-    document.getElementById("t-running").textContent = fmtNum(scalar(G.running), 0);
-    document.getElementById("t-waiting").textContent = fmtNum(scalar(G.waiting), 0);
-    document.getElementById("t-kv").textContent = fmtNum(scalar(G.kv) * 100, 1);
-    const models = G.models.map((r) => r.metric.model_name).filter(Boolean);
-    if (models.length) document.getElementById("model-name").textContent = `모델: ${models.join(", ")}`;
-
-    const toSeries = (res) => (res[0] ? res[0].values.map(([t, v]) => [t, parseFloat(v)]) : []);
-    rpsChart.setData([toSeries(rpsR), toSeries(doneR)], start, end);
-
-    // per-GPU cards, ordered by index
-    const meta = Object.fromEntries(inst[0].map((r) => [r.metric.gpu, r.metric.name]));
-    const gpus = Object.keys(I.total).sort((a, b) => a - b);
-    document.getElementById("empty").hidden = gpus.length > 0;
-    for (const g of gpus) {
-      const card = cards[g] || (cards[g] = createCard(g, meta[g] || ""));
-      updateCard(card, Object.fromEntries(instKeys.map((k) => [k, I[k][g]])));
-      const s = (k) => R[k][g] || [];
-      card.mem.setData([s("model"), s("kvused"), s("other")], start, end);
-      card.util.setData([s("util")], start, end);
-      card.rw.setData([s("rw")], start, end);
-      card.pcie.setData([s("rx"), s("tx")], start, end);
-    }
-
+    await Promise.all([refreshServers(), server ? refreshDashboard() : null]);
     status.className = "status ok";
-    statusText.textContent = `업데이트 ${fmtTime(end)}`;
+    statusText.textContent = `업데이트 ${fmtTime(Date.now() / 1000)}`;
   } catch (err) {
     status.className = "status err";
     statusText.textContent = `Prometheus 연결 실패 (${err.message})`;
   }
 }
+
+select.addEventListener("change", () => {
+  server = select.value;
+  generation++;
+  resetDashboard();
+  history.replaceState(null, "", server ? `#server=${encodeURIComponent(server)}` : location.pathname);
+  refresh();
+});
 
 document.getElementById("range").addEventListener("click", (e) => {
   const btn = e.target.closest("button");

@@ -11,7 +11,9 @@
     <header class="topbar">
       <div>
         <h1>KV Cache Monitor</h1>
-        <div class="sub" id="model-name">vLLM GPU 메모리 실시간 모니터링</div>
+        <select id="server" class="server-select" aria-label="vLLM 서버">
+          <option value="">서버 선택…</option>
+        </select>
       </div>
       <div class="controls">
         <div class="seg" id="range" role="group" aria-label="시간 범위">
@@ -23,6 +25,9 @@
       </div>
     </header>
 
+    <div id="pick" class="empty">위에서 모니터링할 vLLM 서버를 고르세요. 목록은 <code>config/servers.yml</code>에서 정합니다.</div>
+
+    <main id="dash" hidden>
     <section class="tiles">
       <div class="tile"><div class="label">초당 요청 수</div><div class="value" id="t-rps">–</div><div class="unit">req/s</div></div>
       <div class="tile"><div class="label">초당 완료 요청</div><div class="value" id="t-done">–</div><div class="unit">req/s</div></div>
@@ -37,7 +42,8 @@
     </section>
 
     <section id="gpus" class="gpus"></section>
-    <div id="empty" class="empty" hidden>GPU 지표가 아직 없습니다. serving 컨테이너의 exporter(:9400)와 Prometheus 연결을 확인하세요.</div>
+    <div id="empty" class="empty" hidden>이 서버의 GPU 지표가 아직 없습니다. 서버의 exporter(:9400)가 떠 있는지, Prometheus Targets(:9090/targets)에서 UP인지 확인하세요.</div>
+    </main>
 
     <div class="tooltip" id="tooltip" hidden></div>
   </div>

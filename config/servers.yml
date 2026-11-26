@@ -1,0 +1,23 @@
+# 대시보드에서 고를 vLLM 서버 목록 (Prometheus file_sd 형식)
+#
+# - targets: vLLM 서버 주소 host:port (/metrics 를 scrape)
+# - labels.server: 대시보드 선택 상자에 보일 이름 (생략하면 주소를 그대로 씀)
+# - labels.__exporter: GPU exporter 주소. 생략하면 같은 host 의 9400 포트
+#
+# 각 서버에서는 이 저장소의 serving 컨테이너(vLLM + exporter)를 띄우면 됩니다:
+#   docker compose up -d serving
+#
+# 저장하면 Prometheus가 알아서 다시 읽습니다 (재시작 필요 없음).
+
+- targets: ["serving:8000"]
+  labels:
+    server: local
+
+# - targets: ["192.168.10.10:5000"]
+#   labels:
+#     server: A
+#
+# - targets: ["192.168.20.10:5000"]
+#   labels:
+#     server: B
+#     __exporter: "192.168.20.10:9500"

@@ -17,7 +17,7 @@ vLLM으로 LLM을 서빙하는 동안 탐지되는 **모든 GPU**에 대해 아�
 browser ──:8080──▶ frontend (nginx, 정적 대시보드)
                       │  /api/* → prometheus 프록시
                       ▼
-               prometheus :9090  ──2초마다 scrape──▶  serving
+               prometheus :9090  ──2초마다 scrape──▶  serving (config/servers.yml의 서버마다)
                                                        ├─ vLLM OpenAI 서버 :8000 (/v1, /metrics)
                                                        └─ GPU exporter     :9400 (/metrics)
 ```
@@ -68,10 +68,33 @@ docker compose down -v        # 볼륨까지 삭제
 | `VLLM_EXTRA_ARGS` | | `vllm serve`에 그대로 붙는 추가 인자 |
 | `HF_TOKEN` | | gated 모델용 |
 | `VLLM_HOST_PORT` | `8000` | 호스트 쪽 포트 (컨테이너 내부 포트는 고정) |
+| `EXPORTER_HOST_PORT` | `9400` | GPU exporter 호스트 쪽 포트 (다른 호스트의 Prometheus가 가져갈 때) |
 | `FRONTEND_HOST_PORT` | `8080` | |
 | `PROMETHEUS_HOST_PORT` | `9090` | |
 
 vLLM 버전은 `serving/Dockerfile`의 `VLLM_IMAGE` 인자로 바꿉니다.
+
+### 여러 vLLM 서버 모니터링 (`config/servers.yml`)
+
+대시보드 왼쪽 위의 선택 상자에서 볼 서버를 고릅니다. 처음에는 아무것도 선택되어 있지 않습니다. 목록은 `config/servers.yml`(Prometheus `file_sd` 형식)에 적습니다.
+
+```yaml
+- targets: ["serving:8000"]          # 이 compose의 serving 컨테이너
+  labels:
+    server: local
+- targets: ["192.168.10.10:5000"]    # vLLM 주소 (host:port)
+  labels:
+    server: A                        # 선택 상자에 보일 이름 (생략하면 주소)
+- targets: ["192.168.20.10:5000"]
+  labels:
+    server: B
+    __exporter: "192.168.20.10:9500" # exporter 주소. 생략하면 같은 host의 9400
+```
+
+- 다른 호스트에서는 `serving` 컨테이너만 띄우면 됩니다: `docker compose up -d serving` (`.env`의 `VLLM_HOST_PORT`, `EXPORTER_HOST_PORT`로 포트 지정).
+- 파일을 저장하면 Prometheus가 바로 다시 읽습니다. 재시작할 필요가 없습니다.
+- 모든 지표에 `server` 레이블이 붙고, 대시보드는 고른 서버의 지표만 조회합니다. 선택 상자에는 이름, 주소, 서빙 중인 모델(응답이 없으면 "응답 없음")이 나옵니다.
+- 선택한 서버는 URL(`#server=A`)에 남으므로 새로고침하거나 링크를 공유해도 유지됩니다.
 
 ## 대시보드
 
@@ -161,6 +184,7 @@ INPUT_LEN=2048 OUTPUT_LEN=1024 ./bench.sh --ignore-eos       # 뒤 인자는 vll
 | 대시보드에 "GPU 지표가 아직 없습니다" | `docker logs kvmon-serving`에서 `[exporter] N GPU(s) detected`가 찍혔는지, Prometheus Targets(http://localhost:9090/targets)가 UP인지 확인 |
 | 모델·KV Cache가 0으로 나옴 | vLLM이 아직 모델을 올리는 중이거나 실패함. `docker logs kvmon-serving`에서 `Model loading took` 줄 확인 |
 | PCIe가 "미지원" | 이 환경(예: WSL2)의 NVML이 PCIe 처리량을 지원하지 않음. 다른 항목은 정상 동작 |
+| 선택 상자에 서버가 "응답 없음" | 그 호스트에서 vLLM이 떠 있는지, Prometheus 컨테이너에서 그 주소로 접근되는지(방화벽) 확인 |
 | `bench.sh` 실행 시 `No such container` | 먼저 `docker compose up -d`로 스택을 띄우기 |
 
 ## 파일 구조
@@ -170,6 +194,8 @@ INPUT_LEN=2048 OUTPUT_LEN=1024 ./bench.sh --ignore-eos       # 뒤 인자는 vll
 ├── docker-compose.yml
 ├── .env.example
 ├── bench.sh                 # vllm bench serve 부하 테스트
+├── config/
+│   └── servers.yml          # 모니터링할 vLLM 서버 목록
 ├── frontend/
 │   ├── Dockerfile           # nginx:alpine
 │   ├── nginx.conf           # :8080, /api/* → prometheus:9090
@@ -180,7 +206,7 @@ INPUT_LEN=2048 OUTPUT_LEN=1024 ./bench.sh --ignore-eos       # 뒤 인자는 vll
 │   └── exporter.py          # GPU 메모리 구성 / 사용률 / Read/Write exporter
 ├── prometheus/
 │   ├── Dockerfile
-│   └── prometheus.yml       # scrape 2s: serving:8000, serving:9400
+│   └── prometheus.yml       # scrape 2s: servers.yml의 vLLM(/metrics) + exporter(:9400)
 └── docs/
     └── dashboard.png
 ```
