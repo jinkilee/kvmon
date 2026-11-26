@@ -92,7 +92,7 @@ vLLM 버전은 `serving/Dockerfile`의 `VLLM_IMAGE` 인자로 바꿉니다.
 ```
 
 - 다른 호스트에서는 `serving` 컨테이너만 띄우면 됩니다: `docker compose up -d serving` (`.env`의 `VLLM_HOST_PORT`, `EXPORTER_HOST_PORT`로 포트 지정).
-- 파일을 저장하면 Prometheus가 바로 다시 읽습니다. 재시작할 필요가 없습니다.
+- 파일을 저장하면 Prometheus가 바로 다시 읽습니다. 재시작할 필요가 없습니다. 단, `config/` 폴더 자체가 지워졌다 다시 생기면(브랜치 전환 등) Prometheus 컨테이너를 다시 만들어야 합니다 (문제 해결 참고).
 - 모든 지표에 `server` 레이블이 붙고, 대시보드는 고른 서버의 지표만 조회합니다. 선택 상자에는 이름, 주소, 서빙 중인 모델(응답이 없으면 "응답 없음")이 나옵니다.
 - 선택한 서버는 URL(`#server=A`)에 남으므로 새로고침하거나 링크를 공유해도 유지됩니다.
 
@@ -185,6 +185,7 @@ INPUT_LEN=2048 OUTPUT_LEN=1024 ./bench.sh --ignore-eos       # 뒤 인자는 vll
 | 모델·KV Cache가 0으로 나옴 | vLLM이 아직 모델을 올리는 중이거나 실패함. `docker logs kvmon-serving`에서 `Model loading took` 줄 확인 |
 | PCIe가 "미지원" | 이 환경(예: WSL2)의 NVML이 PCIe 처리량을 지원하지 않음. 다른 항목은 정상 동작 |
 | 선택 상자에 서버가 "응답 없음" | 그 호스트에서 vLLM이 떠 있는지, Prometheus 컨테이너에서 그 주소로 접근되는지(방화벽) 확인 |
+| 선택 상자에 "목록에 없음"이 나오고 `servers.yml`을 고쳐도 반영이 안 됨 | 브랜치 전환·merge 등으로 `config/` 폴더가 지워졌다 다시 생기면 Prometheus 컨테이너가 옛 폴더를 계속 봅니다. `docker compose up -d --force-recreate prometheus`로 컨테이너를 다시 만들기 |
 | `bench.sh` 실행 시 `No such container` | 먼저 `docker compose up -d`로 스택을 띄우기 |
 
 ## 파일 구조
